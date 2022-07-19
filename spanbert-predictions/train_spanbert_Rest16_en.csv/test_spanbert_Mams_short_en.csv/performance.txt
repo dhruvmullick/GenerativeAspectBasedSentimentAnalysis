@@ -1,8 +1,0 @@
-step: 42, loss: 0.6758, P: 0.3562, R: 0.3562, F1: 0.3562 (common: 239.0, retrieved: 671.0, relevant: 671.0)
- 
-step: 48, loss: 0.6269, P: 0.3905, R: 0.3905, F1: 0.3905 (common: 262.0, retrieved: 671.0, relevant: 671.0)
- 
-step: 54, loss: 0.5399, P: 0.4039, R: 0.4039, F1: 0.4039 (common: 271.0, retrieved: 671.0, relevant: 671.0)
- 
-step: 60, loss: 0.5492, P: 0.4083, R: 0.4083, F1: 0.4083 (common: 274.0, retrieved: 671.0, relevant: 671.0)
- 

@@ -1,6 +1,9 @@
 # Importing libraries
 import datetime
 import os
+
+os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
+
 import sys
 import time
 import torch
@@ -15,7 +18,7 @@ from rich.console import Console
 from rich.table import Column, Table
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from transformers import MT5Tokenizer, MT5ForConditionalGeneration
+from transformers import MBartForConditionalGeneration, MBartTokenizer
 
 import e2e_tbsa_preprocess
 import evaluate_e2e_tbsa
@@ -39,14 +42,13 @@ from torch import cuda
 device = 'cuda' if cuda.is_available() else 'cpu'
 
 LANG_MAP = {'en': 'english', 'es': 'spanish', 'ru': 'russian'}
-SEED_LIST = [0, 1, 2]
+SEED_LIST = [0]
 LR_LIST = [5e-5]
 
 if sys.argv[1] == "false":
     FULL_DATASET = False
 else:
     FULL_DATASET = True
-
 
 if len(sys.argv) == 3:
     assert sys.argv[2][0] == '[' and sys.argv[2][-1] == ']'
@@ -100,7 +102,10 @@ def validate(tokenizer, model, device, loader):
 
 def build_data(model_params, dataframes, source_text, target_text):
     # tokenzier for encoding the text
-    tokenizer = MT5Tokenizer.from_pretrained(model_params["MODEL"])
+    tokenizer = MBartTokenizer.from_pretrained(model_params["MODEL"], src_lang=utils.get_mbart_lang(train_language),
+                                               tgt_lang=utils.get_mbart_lang(train_language))
+
+    # tokenizer = MBartTokenizer.from_pretrained(model_params["MODEL"], src_lang="en_XX", tgt_lang="en_XX")
     tokenizer.add_tokens(['<sep>', '<lang>'])  # , 'generate_english', 'generate_spanish', 'generate_russian'])
 
     # logging
@@ -185,8 +190,12 @@ def T5Trainer(training_loader, validation_loader, tokenizer, model_params):
 
     # Defining the model. We are using t5-base model and added a Language model layer on top for generation of Summary.
     # Further this model is sent to device (GPU/TPU) for using the hardware.
-    model = MT5ForConditionalGeneration.from_pretrained(model_params["MODEL"])
+    model = MBartForConditionalGeneration.from_pretrained(model_params["MODEL"])
     model = model.to(device)
+    model.resize_token_embeddings(len(tokenizer))
+
+    print("CONFIG SIZE.... ")
+    print(model.config.vocab_size)
 
     # Defining the optimizer that will be used to tune the weights of the network in the training session.
     optimizer = transformers.Adafactor(params=model.parameters(), lr=model_params["LEARNING_RATE"],
@@ -233,6 +242,7 @@ def T5Trainer(training_loader, validation_loader, tokenizer, model_params):
         #     datetime.timedelta(seconds=(epoch_time * (model_params["TRAIN_EPOCHS"] - epoch - 1))))
         # training_logger.add_row(f'{epoch + 1}/{model_params["TRAIN_EPOCHS"]}', f'{train_loss:.5f}', f'{valid_loss:.5f}',
         #                         f'{epoch_time_} (Total est. {total_time_estimated_})')
+
         total_time_estimated_ = str(
             datetime.timedelta(seconds=(epoch_time * (model_params["TRAIN_EPOCHS"] - epoch - 1))))
         training_logger.add_row(f'{epoch + 1}/{model_params["TRAIN_EPOCHS"]}', f'{train_loss:.5f}', f'{valid_f1}',
@@ -270,13 +280,13 @@ def T5Generator(validation_loader, model_params, output_file, model=None, tokeni
 
     if model is None:
         console.log("Using model from path")
-        model = MT5ForConditionalGeneration.from_pretrained(path)
+        model = MBartForConditionalGeneration.from_pretrained(path)
     else:
         console.log("Using existing model")
 
     if tokenizer is None:
         console.log("Using tokenizer from path")
-        tokenizer = MT5Tokenizer.from_pretrained(path)
+        tokenizer = MBartTokenizer.from_pretrained(path)
     else:
         console.log("Using existing tokenizer")
 
@@ -299,11 +309,11 @@ def T5Generator(validation_loader, model_params, output_file, model=None, tokeni
 
 
 def run_program_for_seed(seed, lr):
-    MODEL_DIRECTORY = f"./generative-predictions_t5_full_{FULL_DATASET}_seed_{seed}/{train_domain}_{train_language}"
+    MODEL_DIRECTORY = f"./generative-predictions_bart_full_{FULL_DATASET}_seed_{seed}/{train_domain}_{train_language}"
 
     model_params = {
         "OUTPUT_PATH": MODEL_DIRECTORY,  # output path
-        "MODEL": "google/mt5-base",  # model_type: t5-base/t5-large
+        "MODEL": "facebook/mbart-large-cc25",
         "TRAIN_BATCH_SIZE": 8,  # training batch size
         "VALID_BATCH_SIZE": 8,  # validation batch size
         "TRAIN_EPOCHS": 50,  # number of training epochs
@@ -359,9 +369,25 @@ def preprocess_and_evaluate(prediction_file_path, seed, transformed_sentiments_f
 if __name__ == '__main__':
     # domain: Rest16, Lap14, Mams, Mams_short
     # lang: en, es, ru
-    for train_settings in [('Rest16', 'en', 'Rest16', 'en'), ('Rest16', 'es', 'Rest16', 'es'),
-                           ('Lap14', 'en', 'Lap14', 'en'), ('Mams', 'en', 'Mams', 'en'),
-                           ('Rest16', 'ru', 'Rest16', 'ru')]:
+    # for train_settings in [('Rest16', 'en', 'Rest16', 'en'), ('Rest16', 'es', 'Rest16', 'es'),
+    #                        ('Lap14', 'en', 'Lap14', 'en'), ('Mams', 'en', 'Mams', 'en'),
+    #                        ('Rest16', 'ru', 'Rest16', 'ru')]:
+
+    # for train_settings in [('Rest16', 'en', 'Rest16', 'es'), ('Rest16', 'en', 'Lap14', 'en'),
+    #                        ('Rest16', 'en', 'Mams', 'en'), ('Rest16', 'en', 'Rest16', 'ru'),
+    #                        ('Rest16', 'es', 'Rest16', 'en'), ('Rest16', 'es', 'Lap14', 'en'),
+    #                        ('Rest16', 'es', 'Mams', 'en'), ('Rest16', 'es', 'Rest16', 'ru'),
+    #                        ('Lap14', 'en', 'Rest16', 'en'), ('Lap14', 'en', 'Rest16', 'es'),
+    #                        ('Lap14', 'en', 'Mams', 'en'), ('Lap14', 'en', 'Rest16', 'ru'),
+    #                        ('Mams', 'en', 'Rest16', 'en'), ('Mams', 'en', 'Rest16', 'es'),
+    #                        ('Mams', 'en', 'Lap14', 'en'), ('Mams', 'en', 'Rest16', 'ru')
+    #                        ]:
+
+    # for train_settings in [('Mams', 'en', 'Lap14', 'en'), ('Mams', 'en', 'Rest16', 'ru'),
+    #                        ('Rest16', 'ru', 'Rest16', 'en'), ('Rest16', 'ru', 'Rest16', 'es'),
+    #                        ('Rest16', 'ru', 'Lap14', 'en'), ('Rest16', 'ru', 'Mams', 'en')]:
+
+    for train_settings in [('Mams', 'en', 'Rest16', 'es')]:
 
         train_domain = train_settings[0]
         train_language = train_settings[1]

@@ -64,6 +64,8 @@ def get_sentence_matched_with_targets_and_sentiments(aspects_targets, aspects_se
 
 
 def transform_line_for_target_extraction(line, language, spacy_nlp):
+    # if len(line) < 3:
+    #     return [], []
     generated_polarities, true_polarities = utils.get_polarities_for_line(line, language, spacy_nlp)
     real_sentence = utils.normalise_sentence(line[3].strip(), language, spacy_nlp)
 
@@ -140,17 +142,11 @@ language = {'Rest16_en': 'en', 'Rest16_es': 'es', 'Rest16_ru': 'ru', 'Lap14_en':
             'Mams_short_en': 'en', 'Rest16_en_merged': 'en', 'Rest16_es_merged': 'es', 'Rest16_ru_merged': 'ru',
             'Lap14_en_merged': 'en'}
 
-#### For evaluating spanbert
-for dtrain in training_datasets:
-    for dtest in test_datasets:
-        print("Training set: {}, Testing set: {}".format(dtrain, dtest))
-        nlp = spacy.load(utils.get_spacy_language(language[dtest]), disable=['parser', 'ner'])
-        transform_gold_and_truth(language[dtest], nlp, PREDICTIONS_FILE.format(dtrain, dtest),
-                                 TRANSFORMED_TARGETS_PREDICTIONS_FILE.format(dtrain, dtest),
-                                 TRANSFORMED_SENTIMENTS_PREDICTIONS_FILE.format(dtrain, dtest))
 
-#### For dummy
-# for dtest in datasets:
-#     transform_gold_and_truth(language[dtest], PREDICTIONS_FILE.format(dtest),
-#                              TRANSFORMED_TARGETS_PREDICTIONS_FILE.format(dtest),
-#                              TRANSFORMED_SENTIMENTS_PREDICTIONS_FILE.format(dtest))
+if __name__ == '__main__':
+
+    #### For dummy
+    # for dtest in datasets:
+    #     transform_gold_and_truth(language[dtest], PREDICTIONS_FILE.format(dtest),
+    #                              TRANSFORMED_TARGETS_PREDICTIONS_FILE.format(dtest),
+    #                              TRANSFORMED_SENTIMENTS_PREDICTIONS_FILE.format(dtest))

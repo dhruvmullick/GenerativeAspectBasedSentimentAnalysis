@@ -6,11 +6,8 @@ import random
 
 MAMS_SHORTENED_TEXT_LENGTH = 125
 # lowest possible training record count in the considered datasets.
-SAMPLED_RECORD_COUNT = 857
+# SAMPLED_RECORD_COUNT = 857
 WEIRD_CHARACTERS = '.!?,'
-
-random.seed(0)
-
 
 def join_sentence_and_annotations(words, annotations):
     sentence = ''
@@ -275,6 +272,9 @@ load_dataset = {
 
 
 def preprocess_dataset(domain, language):
+    random.seed(0)
+    np.random.seed(0)
+
     print("Processing the dataset for {}.{}".format(domain, language))
     if not load_dataset.get((domain, language)):
         raise Exception("domain language combination not defined")
@@ -286,7 +286,8 @@ def preprocess_dataset(domain, language):
     assert len(val) == len(val_spanbert)
     assert len(test) == len(test_spanbert)
 
-    rows = random.sample(np.arange(0, len(train_spanbert)).tolist(), SAMPLED_RECORD_COUNT)
+    # rows = random.sample(np.arange(0, len(train_spanbert)).tolist(), SAMPLED_RECORD_COUNT)
+    rows = random.sample(np.arange(0, len(train_spanbert)).tolist(), len(train_spanbert))
 
     train = train.iloc[rows, :]
     train_spanbert = np.array(train_spanbert)[rows]
@@ -295,11 +296,11 @@ def preprocess_dataset(domain, language):
     test = test[test_idx]
     test_spanbert = np.array(test_spanbert)[test_idx]
 
-    train.to_csv('data/processed_train_{}_{}.csv'.format(domain, language), header=True, index=False)
+    train.to_csv('data/processed_full_train_{}_{}.csv'.format(domain, language), header=True, index=False)
     val.to_csv('data/processed_val_{}_{}.csv'.format(domain, language), header=True, index=False)
     test.to_csv('data/processed_test_{}_{}.csv'.format(domain, language), header=True, index=False)
 
-    write_to_file(train_spanbert, 'data/train_spanbert_{}_{}.csv'.format(domain, language))
+    write_to_file(train_spanbert, 'data/train_full_spanbert_{}_{}.csv'.format(domain, language))
     write_to_file(val_spanbert, 'data/val_spanbert_{}_{}.csv'.format(domain, language))
     write_to_file(test_spanbert, 'data/test_spanbert_{}_{}.csv'.format(domain, language))
 

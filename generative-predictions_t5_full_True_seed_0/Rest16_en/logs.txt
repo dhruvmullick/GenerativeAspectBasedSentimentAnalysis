@@ -1,0 +1,26 @@
+[15:43:40] [Validation Completed.]                       train_generative.py:295
+                                                                                
+[Model] Model saved @ 
+./generative-predictions_t5_full_True_seed_0/Rest16_en/model_files
+
+[Validation] Generation on Validation data saved @ ./generative-predictions_t5_f
+ull_True_seed_0/Rest16_en/evaluation_predictions_val.csv
+
+[Logs] Logs saved @ 
+./generative-predictions_t5_full_True_seed_0/Rest16_en/logs.txt
+
+                               Training Status                                
++----------------------------------------------------------------------------+
+|Epoch | train_loss |      val_f1       |             Epoch Time             |
+|------+------------+-------------------+------------------------------------|
+|1/50  |  15.32674  |        0.0        |    0:26:31 (Total est. 21:39:19)   |
+|2/50  |  10.34791  | 3.447499832894601 | 0:39:46 (Total est. 1 day, 7:48:48)|
++----------------------------------------------------------------------------+
+[16:26:59] [Loading Model]...                            train_generative.py:268
+                                                                                
+           Using existing model                          train_generative.py:276
+           Using existing tokenizer                      train_generative.py:282
+           [Initiating Validation]...                    train_generative.py:287
+                                                                                
+Completed 0
+Completed 10

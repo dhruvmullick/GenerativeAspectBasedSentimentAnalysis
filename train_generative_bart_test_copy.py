@@ -1,6 +1,9 @@
 # Importing libraries
 import datetime
 import os
+
+os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
+
 import sys
 import time
 import torch
@@ -15,12 +18,13 @@ from rich.console import Console
 from rich.table import Column, Table
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from transformers import MT5Tokenizer, MT5ForConditionalGeneration
+from transformers import MBartForConditionalGeneration, MBartTokenizer, LogitsProcessorList
 
 import e2e_tbsa_preprocess
 import evaluate_e2e_tbsa
 import utils
 from utils import EarlyStopping, YourDataSetClass
+from logit_processor import CopyWordLogitsProcessor
 
 # pd.set_option('display.max_colwidth', -1)
 
@@ -39,7 +43,7 @@ from torch import cuda
 device = 'cuda' if cuda.is_available() else 'cpu'
 
 LANG_MAP = {'en': 'english', 'es': 'spanish', 'ru': 'russian'}
-SEED_LIST = [0, 1, 2]
+SEED_LIST = [0]
 LR_LIST = [5e-5]
 
 if sys.argv[1] == "false":
@@ -47,8 +51,7 @@ if sys.argv[1] == "false":
 else:
     FULL_DATASET = True
 
-
-if len(sys.argv) == 3:
+if len(sys.argv) >= 3:
     assert sys.argv[2][0] == '[' and sys.argv[2][-1] == ']'
     SEED_LIST = sys.argv[2][1:-1]
     SEED_LIST = SEED_LIST.split(sep='_')
@@ -56,6 +59,13 @@ if len(sys.argv) == 3:
 
 print("SEEDS: {}".format(SEED_LIST))
 
+# if len(sys.argv) >= 4:
+#     if sys.argv[3] == "false":
+#         USE_LOGIT_PROCESSOR = False
+#     else:
+#         USE_LOGIT_PROCESSOR = True
+
+USE_LOGIT_PROCESSOR = True
 
 def train(tokenizer, model, device, loader, optimizer):
     """
@@ -77,6 +87,7 @@ def train(tokenizer, model, device, loader, optimizer):
         loss.backward()
         optimizer.step()
         train_losses.append(loss.item())
+
     return train_losses
 
 
@@ -100,7 +111,10 @@ def validate(tokenizer, model, device, loader):
 
 def build_data(model_params, dataframes, source_text, target_text):
     # tokenzier for encoding the text
-    tokenizer = MT5Tokenizer.from_pretrained(model_params["MODEL"])
+    tokenizer = MBartTokenizer.from_pretrained(model_params["MODEL"], src_lang=utils.get_mbart_lang(train_language),
+                                               tgt_lang=utils.get_mbart_lang(train_language))
+
+    # tokenizer = MBartTokenizer.from_pretrained(model_params["MODEL"], src_lang="en_XX", tgt_lang="en_XX")
     tokenizer.add_tokens(['<sep>', '<lang>'])  # , 'generate_english', 'generate_spanish', 'generate_russian'])
 
     # logging
@@ -125,7 +139,7 @@ def build_data(model_params, dataframes, source_text, target_text):
     # Defining the parameters for creation of dataloaders
     train_params = {'batch_size': model_params["TRAIN_BATCH_SIZE"], 'shuffle': True, 'num_workers': 2}
     val_params = {'batch_size': model_params["VALID_BATCH_SIZE"], 'shuffle': False, 'num_workers': 2}
-    test_params = {'batch_size': model_params["VALID_BATCH_SIZE"], 'shuffle': False, 'num_workers': 2}
+    test_params = {'batch_size': model_params["TEST_BATCH_SIZE"], 'shuffle': False, 'num_workers': 2}
 
     # Creation of Dataloaders for testing and validation. This will be used down for training and validation stage for the model.
     training_loader = DataLoader(training_set, **train_params)
@@ -135,7 +149,7 @@ def build_data(model_params, dataframes, source_text, target_text):
     return training_loader, validation_loader, test_loader, tokenizer
 
 
-def generate(tokenizer, model, device, loader, model_params):
+def generate(tokenizer, model, device, loader, model_params, use_logit_processor=False):
     """
   Function to evaluate model for spanbert-predictions
 
@@ -144,13 +158,25 @@ def generate(tokenizer, model, device, loader, model_params):
     predictions = []
     actuals = []
     data_list = []
+
     with torch.no_grad():
         for _, data in enumerate(loader, 0):
             y = data['target_ids'].to(device, dtype=torch.long)
             ids = data['source_ids'].to(device, dtype=torch.long)
             mask = data['source_mask'].to(device, dtype=torch.long)
 
-            generated_ids = model.generate(,
+            if not use_logit_processor:
+                print("Not using logits processor")
+                logits_processor_list = LogitsProcessorList([])
+            else:
+                print("Using logits processor")
+                logits_processor_list = LogitsProcessorList([CopyWordLogitsProcessor(ids, mask, tokenizer)])
+
+            generated_ids = model.generate(input_ids=ids, attention_mask=mask,
+                                       logits_processor=logits_processor_list,
+                                       max_length=256, do_sample=True, top_p=0.9, top_k=0, num_return_sequences=1,
+                                       decoder_start_token_id=tokenizer.lang_code_to_id[
+                                           utils.get_mbart_lang(test_language)])
 
             preds = [tokenizer.decode(g, skip_special_tokens=True, clean_up_tokenization_spaces=True) for g in
                      generated_ids]
@@ -185,8 +211,9 @@ def T5Trainer(training_loader, validation_loader, tokenizer, model_params):
 
     # Defining the model. We are using t5-base model and added a Language model layer on top for generation of Summary.
     # Further this model is sent to device (GPU/TPU) for using the hardware.
-    model = MT5ForConditionalGeneration.from_pretrained(model_params["MODEL"])
+    model = MBartForConditionalGeneration.from_pretrained(model_params["MODEL"])
     model = model.to(device)
+    model.resize_token_embeddings(len(tokenizer))
 
     # Defining the optimizer that will be used to tune the weights of the network in the training session.
     optimizer = transformers.Adafactor(params=model.parameters(), lr=model_params["LEARNING_RATE"],
@@ -205,7 +232,6 @@ def T5Trainer(training_loader, validation_loader, tokenizer, model_params):
         start_time = time.time()
         train_losses = train(tokenizer, model, device, training_loader, optimizer)
         # valid_losses = validate(tokenizer, model, device, validation_loader)
-        epoch_time = round(time.time() - start_time)
 
         # calculate average loss over an epoch
         train_loss = np.average(train_losses)
@@ -221,11 +247,12 @@ def T5Trainer(training_loader, validation_loader, tokenizer, model_params):
                                                                "transformed_sentiment_val.csv")
 
         T5Generator(validation_loader, model_params=model_params, output_file=prediction_file_name_validation,
-                    model=model, tokenizer=tokenizer)
+                    model=model, tokenizer=tokenizer, use_logit_processor=False)
 
         valid_f1 = preprocess_and_evaluate(predictions_filepath_validation, "", transformed_sentiment_path_validation,
                                            transformed_target_path_validation, True)
 
+        epoch_time = round(time.time() - start_time)
         # preparing the processing time for the epoch and est. the total.
         epoch_time_ = str(datetime.timedelta(seconds=epoch_time))
 
@@ -233,13 +260,14 @@ def T5Trainer(training_loader, validation_loader, tokenizer, model_params):
         #     datetime.timedelta(seconds=(epoch_time * (model_params["TRAIN_EPOCHS"] - epoch - 1))))
         # training_logger.add_row(f'{epoch + 1}/{model_params["TRAIN_EPOCHS"]}', f'{train_loss:.5f}', f'{valid_loss:.5f}',
         #                         f'{epoch_time_} (Total est. {total_time_estimated_})')
+
         total_time_estimated_ = str(
             datetime.timedelta(seconds=(epoch_time * (model_params["TRAIN_EPOCHS"] - epoch - 1))))
         training_logger.add_row(f'{epoch + 1}/{model_params["TRAIN_EPOCHS"]}', f'{train_loss:.5f}', f'{valid_f1}',
                                 f'{epoch_time_} (Total est. {total_time_estimated_})')
         console.print(training_logger)
 
-        # early_stopping needs the validation loss to check if it has decresed, 
+        # early_stopping needs the validation loss to check if it has decreased,
         # and if it has, it will make a checkpoint of the current model
         # early_stopping(valid_loss, model)
         early_stopping(valid_f1, model)
@@ -260,7 +288,7 @@ def T5Trainer(training_loader, validation_loader, tokenizer, model_params):
     os.remove(f'{model_params["OUTPUT_PATH"]}/best_pytorch_model.bin')
 
 
-def T5Generator(validation_loader, model_params, output_file, model=None, tokenizer=None):
+def T5Generator(validation_loader, model_params, output_file, model=None, tokenizer=None, use_logit_processor=False):
     torch.manual_seed(model_params['SEED'])  # pytorch random seed
     np.random.seed(model_params['SEED'])  # numpy random seed
 
@@ -270,28 +298,30 @@ def T5Generator(validation_loader, model_params, output_file, model=None, tokeni
 
     if model is None:
         console.log("Using model from path")
-        model = MT5ForConditionalGeneration.from_pretrained(path)
+        model = MBartForConditionalGeneration.from_pretrained(path)
     else:
         console.log("Using existing model")
 
     if tokenizer is None:
         console.log("Using tokenizer from path")
-        tokenizer = MT5Tokenizer.from_pretrained(path)
+        tokenizer = MBartTokenizer.from_pretrained(path)
     else:
         console.log("Using existing tokenizer")
 
     model = model.to(device)
 
     # evaluating test dataset
-    console.log(f"[Initiating Validation]...\n")
 
-    predictions, actuals, data_list = generate(tokenizer, model, device, validation_loader, model_params)
+    console.log(f"[Initiating Generation]...\n")
+
+    predictions, actuals, data_list = generate(tokenizer, model, device, validation_loader, model_params, use_logit_processor)
     final_df = pd.DataFrame({'Generated Text': predictions, 'Actual Text': actuals, 'Original Sentence': data_list})
     final_df.to_csv(os.path.join(model_params["OUTPUT_PATH"], output_file))
 
     console.save_text(os.path.join(model_params["OUTPUT_PATH"], 'logs.txt'))
 
-    console.log(f"[Validation Completed.]\n")
+    console.log(f"[Generation Completed.]\n")
+
     console.print(f"""[Model] Model saved @ {os.path.join(model_params["OUTPUT_PATH"], "model_files")}\n""")
     console.print(
         f"""[Validation] Generation on Validation data saved @ {os.path.join(model_params["OUTPUT_PATH"], output_file)}\n""")
@@ -299,13 +329,14 @@ def T5Generator(validation_loader, model_params, output_file, model=None, tokeni
 
 
 def run_program_for_seed(seed, lr):
-    MODEL_DIRECTORY = f"./generative-predictions_t5_full_{FULL_DATASET}_seed_{seed}/{train_domain}_{train_language}"
+    MODEL_DIRECTORY = f"./generative-predictions_bart_test_copy_{USE_LOGIT_PROCESSOR}_seed_{seed}/{train_domain}_{train_language}"
 
     model_params = {
         "OUTPUT_PATH": MODEL_DIRECTORY,  # output path
-        "MODEL": "google/mt5-base",  # model_type: t5-base/t5-large
+        "MODEL": "facebook/mbart-large-cc25",
         "TRAIN_BATCH_SIZE": 8,  # training batch size
         "VALID_BATCH_SIZE": 8,  # validation batch size
+        "TEST_BATCH_SIZE": 1,  # validation batch size
         "TRAIN_EPOCHS": 50,  # number of training epochs
         "VAL_EPOCHS": 1,  # number of validation epochs
         "LEARNING_RATE": lr,  # learning rate
@@ -333,8 +364,16 @@ def run_program_for_seed(seed, lr):
                                                                             target_text="sentences_opinions")
 
     T5Trainer(training_loader, validation_loader, tokenizer, model_params=model_params)
-    T5Generator(test_loader, model_params=model_params, output_file=predictions_file)
 
+    print("Generating and evaluating with logit processor = " + str(not USE_LOGIT_PROCESSOR))
+
+    T5Generator(test_loader, model_params=model_params, output_file=predictions_file, use_logit_processor=(not USE_LOGIT_PROCESSOR))
+    preprocess_and_evaluate(prediction_file_path, seed, transformed_sentiments_file_path,
+                            transformed_targets_file_path, False, lr)
+
+    print("Generating and evaluating with logit processor = " + str(USE_LOGIT_PROCESSOR))
+
+    T5Generator(test_loader, model_params=model_params, output_file=predictions_file, use_logit_processor=USE_LOGIT_PROCESSOR)
     preprocess_and_evaluate(prediction_file_path, seed, transformed_sentiments_file_path,
                             transformed_targets_file_path, False, lr)
 
@@ -357,49 +396,31 @@ def preprocess_and_evaluate(prediction_file_path, seed, transformed_sentiments_f
 
 
 if __name__ == '__main__':
-    # domain: Rest16, Lap14, Mams, Mams_short
-    # lang: en, es, ru
-    for train_settings in [('Rest16', 'en', 'Rest16', 'en'), ('Rest16', 'es', 'Rest16', 'es'),
-                           ('Lap14', 'en', 'Lap14', 'en'), ('Mams', 'en', 'Mams', 'en'),
-                           ('Rest16', 'ru', 'Rest16', 'ru')]:
 
-        train_domain = train_settings[0]
-        train_language = train_settings[1]
-        test_domain = train_settings[2]
-        test_language = train_settings[3]
+    for train_settings in [('Rest16', 'en'), ('Rest16', 'es'), ('Lap14', 'en'), ('Mams', 'en'), ('Rest16', 'ru')]:
 
-        if FULL_DATASET:
-            training_file = './data/processed_full_train_{}_{}.csv'.format(train_domain, train_language)
-        else:
-            training_file = './data/processed_train_{}_{}.csv'.format(train_domain, train_language)
+        for test_settings in [('Rest16', 'en'), ('Rest16', 'es'), ('Lap14', 'en'), ('Mams', 'en'), ('Rest16', 'ru')]:
 
-        validation_file = './data/processed_val_{}_{}.csv'.format(train_domain, train_language)
-        test_file = './data/processed_test_{}_{}.csv'.format(test_domain, test_language)
-        print("----------------\n\n"
-              "Experiment: Training on {}.{}, Testing on {}.{}".format(train_domain, train_language, test_domain,
-                                                                       test_language))
+            train_domain = train_settings[0]
+            train_language = train_settings[1]
+            test_domain = test_settings[0]
+            test_language = test_settings[1]
 
-        training = pd.read_csv(training_file)
-        validation = pd.read_csv(validation_file)
-        test = pd.read_csv(test_file)
+            if FULL_DATASET:
+                training_file = './data/processed_full_train_{}_{}.csv'.format(train_domain, train_language)
+            else:
+                training_file = './data/processed_train_{}_{}.csv'.format(train_domain, train_language)
 
-        # for cross-lingual
-        # training['sentences_texts'] = training['sentences_texts'].map(lambda txt: f'generate {lang_map[train_settings[1]]} </s> {txt}')
-        # validation['sentences_texts'] = validation['sentences_texts'].map(lambda txt: f'generate {lang_map[train_settings[1]]} </s> {txt}')
-        # test['sentences_texts'] = test['sentences_texts'].map(lambda txt: f'generate {lang_map[train_settings[1]]} </s> {txt}')
+            validation_file = './data/processed_val_{}_{}.csv'.format(train_domain, train_language)
+            test_file = './data/processed_test_{}_{}.csv'.format(test_domain, test_language)
+            print("----------------\n\n"
+                  "Experiment: Training on {}.{}, Testing on {}.{}".format(train_domain, train_language, test_domain,
+                                                                           test_language))
 
-        for lr in LR_LIST:
-            for seed in SEED_LIST:
-                run_program_for_seed(seed, lr)
+            training = pd.read_csv(training_file)
+            validation = pd.read_csv(validation_file)
+            test = pd.read_csv(test_file)
 
-    # test_language = 'en'
-    # train_domain = ''
-    # train_language = ''
-    # test_domain = ''
-    # training=None
-    # validation=None
-    # test = None
-    #
-    # preprocess_and_evaluate('/Users/dhruvmullick/Projects/GenerativeAspectBasedSentimentAnalysis/evaluation_predictions_val.csv', 0,
-    #                         '/Users/dhruvmullick/Projects/GenerativeAspectBasedSentimentAnalysis/evaluation_predictions_val_sent.csv',
-    #                         '/Users/dhruvmullick/Projects/GenerativeAspectBasedSentimentAnalysis/evaluation_predictions_val_asp.csv',False)
+            for lr in LR_LIST:
+                for seed in SEED_LIST:
+                    run_program_for_seed(seed, lr)
