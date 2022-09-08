@@ -145,6 +145,8 @@ language = {'Rest16_en': 'en', 'Rest16_es': 'es', 'Rest16_ru': 'ru', 'Lap14_en':
 
 if __name__ == '__main__':
 
+    print("script main body")
+
     #### For dummy
     # for dtest in datasets:
     #     transform_gold_and_truth(language[dtest], PREDICTIONS_FILE.format(dtest),

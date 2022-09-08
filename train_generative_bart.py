@@ -155,7 +155,10 @@ def generate(tokenizer, model, device, loader, model_params):
             ids = data['source_ids'].to(device, dtype=torch.long)
             mask = data['source_mask'].to(device, dtype=torch.long)
 
-            generated_ids = model.generate(,
+            generated_ids = model.generate(input_ids=ids, attention_mask=mask,
+                                           max_length=256, do_sample=True, top_p=0.9, top_k=0, num_return_sequences=1,
+                                           decoder_start_token_id=tokenizer.lang_code_to_id[
+                                               utils.get_mbart_lang(test_language)])
 
             preds = [tokenizer.decode(g, skip_special_tokens=True, clean_up_tokenization_spaces=True) for g in
                      generated_ids]

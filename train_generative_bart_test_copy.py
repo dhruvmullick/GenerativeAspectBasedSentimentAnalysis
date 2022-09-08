@@ -367,11 +367,25 @@ def run_program_for_seed(seed, lr):
 
     print("Generating and evaluating with logit processor = " + str(not USE_LOGIT_PROCESSOR))
 
+    predictions_file = f'{test_domain}_{test_language}_predictions_non_copy.csv'
+    prediction_file_path = os.path.join(model_params["OUTPUT_PATH"], predictions_file)
+    transformed_targets_file = f'{test_domain}_{test_language}_transformed-targets_non_copy.csv'
+    transformed_targets_file_path = os.path.join(model_params["OUTPUT_PATH"], transformed_targets_file)
+    transformed_sentiments_file = f'{test_domain}_{test_language}_transformed-sentiments_non_copy.csv'
+    transformed_sentiments_file_path = os.path.join(model_params["OUTPUT_PATH"], transformed_sentiments_file)
+
     T5Generator(test_loader, model_params=model_params, output_file=predictions_file, use_logit_processor=(not USE_LOGIT_PROCESSOR))
     preprocess_and_evaluate(prediction_file_path, seed, transformed_sentiments_file_path,
                             transformed_targets_file_path, False, lr)
 
     print("Generating and evaluating with logit processor = " + str(USE_LOGIT_PROCESSOR))
+
+    predictions_file = f'{test_domain}_{test_language}_predictions_copy.csv'
+    prediction_file_path = os.path.join(model_params["OUTPUT_PATH"], predictions_file)
+    transformed_targets_file = f'{test_domain}_{test_language}_transformed-targets_copy.csv'
+    transformed_targets_file_path = os.path.join(model_params["OUTPUT_PATH"], transformed_targets_file)
+    transformed_sentiments_file = f'{test_domain}_{test_language}_transformed-sentiments_copy.csv'
+    transformed_sentiments_file_path = os.path.join(model_params["OUTPUT_PATH"], transformed_sentiments_file)
 
     T5Generator(test_loader, model_params=model_params, output_file=predictions_file, use_logit_processor=USE_LOGIT_PROCESSOR)
     preprocess_and_evaluate(prediction_file_path, seed, transformed_sentiments_file_path,
@@ -399,7 +413,7 @@ if __name__ == '__main__':
 
     for train_settings in [('Rest16', 'en'), ('Rest16', 'es'), ('Lap14', 'en'), ('Mams', 'en'), ('Rest16', 'ru')]:
 
-        for test_settings in [('Rest16', 'en'), ('Rest16', 'es'), ('Lap14', 'en'), ('Mams', 'en'), ('Rest16', 'ru')]:
+        for test_settings in [('Lap14', 'en')]:
 
             train_domain = train_settings[0]
             train_language = train_settings[1]
